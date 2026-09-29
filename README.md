@@ -2,6 +2,8 @@
 
 为 Codex 桌面端增加额度显示、项目配色和会话 Token 统计，适配浅色与深色主题。
 
+本 fork 的 Windows `0.10.1-fork.1` 试验版增加可靠启动入口：安装后从桌面“Codex 用量条”打开，首次启动即带连接参数，点击/输入不再取消加载，也不需要关闭重开。支持按当前安装包身份激活 Microsoft Store 客户端。[使用说明](docs/windows.md)。下方下载链接仍是上游版本，不包含此改进。
+
 ![Codex Usage Badge：原生风格额度圆环、项目配色与 Token 色块](assets/cover.png)
 
 ## 功能
