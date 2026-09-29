@@ -102,6 +102,20 @@ public class StartupFixture : Form {
     Assert $activationFailed 'Invalid Store identity must fail activation'
     Assert (([CodexUsageBadge.Startup.Native]::TakeSnapshot()).apps.Count -eq 0) 'Store activation failure must not fall back to an executable'
     $idField.SetValue($null,$null)
+    # Explicit launch must not depend on input stamps, foreground state or watcher lifetime.
+    # A hidden disposable fixture receives the flags even with the watcher stopped.
+    [IO.File]::WriteAllText((Join-Path $temp 'watcher-stop'),'stop')
+    $explicitPid=[CodexUsageBadge.Startup.Native]::StartExplicit($fixture,$null)
+    $child=[Diagnostics.Process]::GetProcessById($explicitPid)
+    $snapshot=[CodexUsageBadge.Startup.Native]::TakeSnapshot()
+    Assert ($snapshot.apps.Count -eq 1 -and $snapshot.apps[0].pid -eq $explicitPid -and $snapshot.apps[0].debugPort -eq '39222') 'Explicit launch must carry debug flags without input guards'
+    Stop-Fixture
+    Remove-Item -LiteralPath (Join-Path $temp 'watcher-stop')
+    Remove-Item -LiteralPath (Join-Path $temp 'stop')
+    $activationFailed=$false
+    try { [CodexUsageBadge.Startup.Native]::StartExplicit($fixture,('CodexUsageBadgeMissing_'+[guid]::NewGuid().ToString('N')+'!App')) | Out-Null } catch { $activationFailed=$true }
+    Assert $activationFailed 'Explicit Store activation must surface errors'
+    Assert (([CodexUsageBadge.Startup.Native]::TakeSnapshot()).apps.Count -eq 0) 'Explicit Store activation must not fall back to desktop execution'
     # This fixture overrides SetVisibleCore, so the native launch cannot display a window.
     $snapshot=[CodexUsageBadge.Startup.Native]::TakeSnapshot()
     $reply=[CodexUsageBadge.Startup.Native]::Launch($snapshot.inputStamp,$snapshot.frontmostPid)

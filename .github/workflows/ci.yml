@@ -33,6 +33,10 @@ jobs:
       - name: PowerShell portability and rollback tests
         shell: pwsh
         run: ./tests/windows.ps1
+      - name: Explicit Windows launch and Store identity
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./tests/windows-launch.ps1
       - name: Native Windows install and shutdown
         if: runner.os == 'Windows'
         shell: powershell

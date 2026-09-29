@@ -3,7 +3,7 @@ param(
     [string]$AppExe, [string]$NodeExe, [string]$CodexBin, [string]$CodexHome
 )
 $ErrorActionPreference = 'Stop'
-$script:Version = '0.10.0'
+$script:Version = '0.10.1-fork.1'
 $script:Owner = 'local.codexusagebadge.windows'
 
 function ConvertTo-NativeArgument([AllowEmptyString()][string]$Value) {
@@ -99,6 +99,34 @@ function Test-DesktopExecutable([string]$Path) {
     return $Path -and (Test-Path -LiteralPath $Path -PathType Leaf) -and
         $Path -match '(?i)[/\\](Codex|ChatGPT)\.exe$' -and
         (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $Path) 'resources\app.asar') -PathType Leaf)
+}
+function Get-AppActivationId([string]$AppPath) {
+    $fullPath = [IO.Path]::GetFullPath($AppPath)
+    if (Get-Command Get-AppxPackage -ErrorAction SilentlyContinue) {
+        foreach ($pkg in @(Get-AppxPackage -ErrorAction Stop | Where-Object { $_.Name -match '^OpenAI\.(Codex|ChatGPT)(\.|$)' })) {
+            if (!$pkg.InstallLocation) { continue }
+            $prefix = [IO.Path]::GetFullPath($pkg.InstallLocation).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+            if (!$fullPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $manifest = Get-AppxPackageManifest -Package $pkg.PackageFullName -ErrorAction Stop
+            foreach ($entry in @($manifest.Package.Applications.Application)) {
+                if (!$entry.Executable -or !$entry.Id) { continue }
+                $candidate = [IO.Path]::GetFullPath((Join-Path $pkg.InstallLocation ([string]$entry.Executable)))
+                if ($candidate.Equals($fullPath, [StringComparison]::OrdinalIgnoreCase)) {
+                    return ([string]$pkg.PackageFamilyName + '!' + [string]$entry.Id)
+                }
+            }
+            throw '无法确认商店版客户端的启动标识，请重新安装客户端后重试。'
+        }
+    }
+    if ($fullPath -match '(?i)[/\\]WindowsApps[/\\]') { throw '未找到当前商店版客户端的注册信息；不会直接执行 WindowsApps 内文件。' }
+    return $null
+}
+function Start-ExplicitClient($Config) {
+    $id = Get-AppActivationId $Config.AppExe
+    if (!('CodexUsageBadge.Startup.Native' -as [type])) {
+        Add-Type -Path (Join-Path $script:InstallRoot 'startup/windows-native.cs') -ReferencedAssemblies System.Management,System.Core,System.Windows.Forms
+    }
+    [void][CodexUsageBadge.Startup.Native]::StartExplicit($Config.AppExe, $id)
 }
 function Get-AppCandidates($Saved) {
     foreach ($proc in @(Get-Process -Name 'Codex','ChatGPT' -ErrorAction SilentlyContinue)) {
@@ -360,7 +388,7 @@ function Run-Worker {
 }
 function Save-ShortcutState {
     foreach ($path in @($script:DesktopLink,$script:StartupLink)) {
-        if ($path -eq $script:DesktopLink -and !(Test-OwnedShortcut $path 'Launch')) { continue }
+        if ($path -eq $script:DesktopLink -and (Test-Path -LiteralPath $path) -and !(Test-OwnedShortcut $path 'Launch')) { continue }
         $data = $null
         if (Test-Path -LiteralPath $path) { $data = [IO.File]::ReadAllBytes($path) }
         [pscustomobject]@{ Path = $path; Data = $data }
@@ -403,7 +431,9 @@ function Install-Badge($Overrides) {
         if (Test-Path -LiteralPath $oldReceipt) { Copy-Item -LiteralPath $oldReceipt -Destination (Join-Path $stage 'startup/state.json') }
         if (Test-Path -LiteralPath $script:InstallRoot) { Move-Item -LiteralPath $script:InstallRoot -Destination $backup; $oldMoved = $true }
         Move-Item -LiteralPath $stage -Destination $script:InstallRoot; $swapped = $true
-        if (Test-OwnedShortcut $script:DesktopLink 'Launch') { Remove-Item -LiteralPath $script:DesktopLink -Force }
+        if (!(Test-Path -LiteralPath $script:DesktopLink) -or (Test-OwnedShortcut $script:DesktopLink 'Launch')) {
+            Write-Shortcut $script:DesktopLink 'Launch' $config.AppExe
+        }
         Write-Shortcut $script:StartupLink 'Run' $config.AppExe
         Start-Worker
     } catch {
@@ -420,8 +450,8 @@ function Install-Badge($Overrides) {
     } finally {
         if (Test-Path -LiteralPath $stage) { Assert-OwnedDirectory $stage; Remove-Item -LiteralPath $stage -Recurse -Force }
     }
-    Write-Host '安装成功。下次完全退出后，直接使用原来的 Codex 图标打开即可自动加载。'
-    Write-Host '已打开的窗口不会被接管。若自动加载被安全保护跳过，可完全退出后运行 Launch.cmd。'
+    Write-Host '安装成功。推荐从桌面“Codex 用量条”或 Launch.cmd 打开：首次启动即带连接参数，点击、输入不会取消加载。'
+    Write-Host '原图标仍支持有条件的自动加载。已打开且未连接的客户端不会被关闭，请完全退出后使用用量条入口。'
     if ($oldMoved) { Write-Host "旧版本备份：$backup" }
 }
 function Get-DebugPages {
@@ -434,16 +464,20 @@ function Launch-Badge {
     Assert-OwnedDirectory $script:InstallRoot
     if (!(Test-Path -LiteralPath $script:ConfigPath)) { throw '尚未安装，请先运行 Install.cmd。' }
     $config = Resolve-Configuration (Read-Json $script:ConfigPath) $null
-    Stop-Worker
-    Write-Json $script:ConfigPath $config
-    Start-Worker
-    if (@(Get-DebugPages).Count -gt 0) { return }
+    if (@(Get-DebugPages).Count -gt 0) {
+        if (!(Test-Worker)) { Start-Worker }
+        return
+    }
     $running = @(Get-Process -Name 'Codex','ChatGPT' -ErrorAction SilentlyContinue | Where-Object {
         try { Test-DesktopExecutable $_.Path } catch { $false }
     })
     if ($running.Count -gt 0) { throw '客户端已运行，但没有开启用量条连接。请从托盘菜单或客户端菜单完全退出，再运行 Launch.cmd。不会强制结束你的会话。' }
-    # Only this explicit user action starts the GUI. The Run action cannot call this function.
-    Start-Process -FilePath $config.AppExe -ArgumentList '--remote-debugging-address=127.0.0.1 --remote-debugging-port=39222' | Out-Null
+    Stop-Worker
+    Write-Json $script:ConfigPath $config
+    Start-Worker
+    # Start with the flags on the first launch; no input-sensitive quit/reopen cycle.
+    # Store packages require activation by the identity matching the resolved executable.
+    Start-ExplicitClient $config
     for ($i = 0; $i -lt 30; $i++) {
         if (@(Get-DebugPages).Count -gt 0) { return }
         Start-Sleep -Seconds 1

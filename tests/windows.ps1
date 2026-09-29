@@ -107,7 +107,7 @@ try {
     $script:failLink = $false
     Install-Badge $null
     Assert ($script:running -and (Test-Path -LiteralPath $script:ConfigPath)) 'install succeeded'
-    Assert (!(Test-Path -LiteralPath $script:DesktopLink)) 'no separate desktop launcher created'
+    Assert (Test-OwnedShortcut $script:DesktopLink 'Launch') 'reliable desktop launcher created'
     Write-Utf8 $script:DesktopLink (Get-ManagerArguments 'Launch')
     Write-Json (Join-Path $script:InstallRoot 'startup/state.json') @{lastAttemptAt=123;event='attempt'}
     $firstConfig = Get-Content -LiteralPath $script:ConfigPath -Raw
@@ -119,7 +119,7 @@ try {
     Assert (Test-OwnedShortcut $script:DesktopLink 'Launch') 'failed upgrade restores legacy shortcut'
     Install-Badge $null
     Assert (!(Test-Path -LiteralPath (Join-Path $script:InstallRoot 'old-version.txt'))) 'successful upgrade uses new package'
-    Assert (!(Test-Path -LiteralPath $script:DesktopLink)) 'owned legacy shortcut removed'
+    Assert (Test-OwnedShortcut $script:DesktopLink 'Launch') 'owned desktop launcher retained on upgrade'
     Assert ((Read-Json (Join-Path $script:InstallRoot 'startup/state.json')).lastAttemptAt -eq 123) 'cooldown receipt retained during upgrade'
     Write-Utf8 (Join-Path $temp 'unrelated-data.txt') 'keep'
     Uninstall-Badge

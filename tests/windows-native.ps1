@@ -4,7 +4,6 @@ if ($env:OS -ne 'Windows_NT') { throw 'Windows runner required' }
 $root = Split-Path -Parent $PSScriptRoot
 $version = (Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).windowsVersion
 $package = Join-Path $root ('dist/CodexUsageBadge-Windows-' + $version)
-. (Join-Path $package 'manage-windows.ps1') -Action Functions
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('badge-native-中文 空格-' + [guid]::NewGuid().ToString('N'))
 $originalLocal = $env:LOCALAPPDATA
 $originalCodeHome = $env:CODEX_HOME
@@ -13,6 +12,13 @@ foreach ($key in @('CODEX_BADGE_APP','CODEX_BADGE_BIN','CODEX_BADGE_PORT','CODEX
 function Assert($Condition, [string]$Message) { if (!$Condition) { throw $Message } }
 try {
     [void][IO.Directory]::CreateDirectory($temp)
+    # The real agent/bridge use a fixed port which may belong to the developer's client.
+    # This OS smoke test needs child lifetimes and COM shortcuts, not live CDP access.
+    $fixturePackage=Join-Path $temp 'package'
+    Copy-Item -LiteralPath $package -Destination $fixturePackage -Recurse
+    [IO.File]::WriteAllText((Join-Path $fixturePackage 'agent.cjs'), 'const fs=require("node:fs");setInterval(()=>{if(fs.existsSync(process.env.CODEX_BADGE_STOP_FILE))process.exit(0);},50);')
+    [IO.File]::WriteAllText((Join-Path $fixturePackage 'bridge.cjs'), 'console.log(JSON.stringify({action:process.argv[2],windows:[],fixture:true}));')
+    . (Join-Path $fixturePackage 'manage-windows.ps1') -Action Functions
     $env:LOCALAPPDATA = $temp
     $env:CODEX_HOME = Join-Path $temp 'synthetic-home'
     [void][IO.Directory]::CreateDirectory($env:CODEX_HOME)
@@ -30,7 +36,7 @@ try {
     Write-Shortcut $script:DesktopLink 'Launch' $gui
     Install-Badge ([pscustomobject]@{AppExe=$gui;NodeExe=$runtime;CodexBin=$cli;CodexHome=$env:CODEX_HOME})
     Assert (Test-Worker) 'Native hidden supervisor did not start'
-    Assert (!(Test-Path -LiteralPath $script:DesktopLink)) 'Legacy desktop shortcut not removed'
+    Assert (Test-OwnedShortcut $script:DesktopLink 'Launch') 'Reliable desktop shortcut target mismatch'
     Assert (Test-OwnedShortcut $script:StartupLink 'Run') 'Startup shortcut target mismatch'
     $state = Read-Json $script:StatePath
     $agentPid = $state.AgentPid

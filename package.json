@@ -1,7 +1,7 @@
 {
   "name": "codex-usage-badge",
   "version": "0.9.2",
-  "windowsVersion": "0.10.0",
+  "windowsVersion": "0.10.1-fork.1",
   "private": true,
   "description": "Local desktop quota rings, project colors and Token indicators for Codex",
   "license": "MIT",
