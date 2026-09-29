@@ -254,20 +254,28 @@ namespace CodexUsageBadge.Startup {
             }
         }
         static Process StartApplication() {
+            return StartClient(appPath,applicationId,true);
+        }
+        // Explicit user launch: no takeover, quit request, input monitor or foreground guard.
+        // The caller resolves the current Store identity and refuses unconnected running clients.
+        public static int StartExplicit(string executable,string id) {
+            using(var p=StartClient(Path.GetFullPath(executable),id,false)) { return p.Id; }
+        }
+        static Process StartClient(string executable,string id,bool hidden) {
             const string flags="--remote-debugging-address=127.0.0.1 --remote-debugging-port=39222";
-            if(!String.IsNullOrEmpty(applicationId)) {
+            if(!String.IsNullOrEmpty(id)) {
                 // WindowsApps executables can reject direct Process.Start with access denied.
                 // AO_NOERRORUI only: AO_NOSPLASHSCREEN requires package debugging and can terminate the app.
                 object manager=new ActivationManager();
                 try {
                     uint pid;
-                    int result=((IActivationManager)manager).ActivateApplication(applicationId,flags,2,out pid);
+                    int result=((IActivationManager)manager).ActivateApplication(id,flags,2,out pid);
                     if(result<0) Marshal.ThrowExceptionForHR(result);
                     return Process.GetProcessById(checked((int)pid));
                 } finally { Marshal.ReleaseComObject(manager); }
             }
-            var info=new ProcessStartInfo(appPath,flags) {
-                UseShellExecute=false,WindowStyle=ProcessWindowStyle.Hidden,WorkingDirectory=Path.GetDirectoryName(appPath)};
+            var info=new ProcessStartInfo(executable,flags) {
+                UseShellExecute=false,WindowStyle=hidden?ProcessWindowStyle.Hidden:ProcessWindowStyle.Normal,WorkingDirectory=Path.GetDirectoryName(executable)};
             return Process.Start(info);
         }
         public static object Show(int pid,string key,string stamp,int foreground) {
