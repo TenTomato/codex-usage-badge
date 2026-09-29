@@ -18,6 +18,8 @@ node tests/startup-native.cjs .devtools/macos-startup-bridge
 
 PowerShell 测试：`pwsh -File tests/windows.ps1`。Windows CI 还会运行 `tests/windows-native.ps1`，验证安装、快捷方式、后台停止和卸载。
 
+`powershell -NoProfile -ExecutionPolicy Bypass -File tests/windows-launch.ps1` 使用模拟启动/包 API，验证 Store 身份精确匹配、冷启动、已连接复用、后台恢复和已有工作窗口保护。`tests/windows-startup-native.ps1` 还验证显式启动不依赖输入检测，且 Store 激活失败不回退到直接执行。运行前先构建 Windows 安装包。
+
 Windows 启动适配器测试：`powershell -NoProfile -ExecutionPolicy Bypass -File tests/windows-startup-native.ps1`。它仅操作临时隐藏应用，检查进程身份、Raw Input 活动分类、正常退出/拒绝及重开。`startup/` 为 Windows 适配器；macOS 保持原有 `macos/startup/` 实现。
 
 只构建 Windows：`python scripts/build_release.py --platform Windows`。其版本取自 `package.json` 的 `windowsVersion`，不修改 macOS 的 `version` 或已有发布附件。Windows 发布使用 `v<版本>-windows` 标签，只上传 Windows ZIP 和该 ZIP 的校验文件。
